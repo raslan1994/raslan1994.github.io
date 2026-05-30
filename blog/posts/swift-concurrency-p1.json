@@ -26,7 +26,7 @@
       }
     },
     {
-      "contentType": "text",
+      "contentType": "bbcode",
       "body": {
         "title": "Step 1: Preparations & Extras",
         "text": "This example follows a simple bank account transaction model. Before we introduce the actor, we define a basic error type to handle cases such as attempting to withdraw more than the available balance. This is a plain [tag]enum[/tag] and is not related to concurrency yet."
