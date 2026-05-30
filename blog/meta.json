@@ -1,0 +1,9 @@
+[
+  {
+    "id": "swift-concurrency-p1",
+    "title": "Swift Concurrency Part 1: Actors & Isolation",
+    "subtitle": "This is Part 1 of a 3-part series on Swift Concurrency, Mainly focused on Actors & Isolation",
+    "postType": "technical",
+    "dynamicThumb": false
+  }
+]

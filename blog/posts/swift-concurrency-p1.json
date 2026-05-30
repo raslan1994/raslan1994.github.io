@@ -1,0 +1,255 @@
+{
+  "id": "swift-concurrency-p1",
+  "title": "Swift Concurrency Part 1: Actors & Isolation",
+  "subtitle": "This is Part 1 of a 3-part series on Swift Concurrency, Mainly focused on Actors & Isolation",
+  "postType": "technical",
+  "dynamicThumb": false,
+  "contents": [
+    {
+      "contentType": "idea",
+      "body": {
+        "title": "How to follow along",
+        "text": "Every code block in this article is a building block. By the end, you'll have a complete working playground you can paste directly into Xcode and run. No inputs needed."
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "The Problem Actors Solve",
+        "text": "Picture two threads reaching for the same variable at the same moment. One reads while the other writes. The result is an undefined [b]data race[/b]. Before Swift's actor model, you defended against this manually with DispatchQueue, [tag]NSLock[/tag], or [tag]os_unfair_lock[/tag]. Forget one lock and your app crashes in production, on a device you can't reproduce."
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "text": "Actors are Swift's built-in answer. The compiler enforces thread safety for you. no locks, no queues, no guessing."
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "Step 1: Preparations & Extras",
+        "text": "This example follows a simple bank account transaction model. Before we introduce the actor, we define a basic error type to handle cases such as attempting to withdraw more than the available balance. This is a plain [tag]enum[/tag] and is not related to concurrency yet."
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "enum BankError: Error {\n    case insufficientFunds(requested: Double, available: Double)\n    case negativeAmount\n}\n"
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "text": "Clean and descriptive. When a withdrawal fails, the error carries exactly what was requested and what was actually available."
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "Step 2: Defining an Actor",
+        "text": "An [tag]actor[/tag] looks almost identical to a [tag]class[/tag]. The difference is what the compiler does with it: [b]only one piece of code can access its mutable state at a time.[/b] No locks required, the Swift runtime serialises access automatically."
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "actor BankAccount {\n    let accountNumber: String   // constant: never changes\n    let owner: String           // constant: never changes\n    private(set) var balance: Double    // mutable: needs protection\n\n    init(accountNumber: String, owner: String, initialBalance: Double) {\n        self.accountNumber = accountNumber\n        self.owner = owner\n        self.balance = initialBalance\n    }\n\n    func deposit(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        balance += amount\n    }\n\n    func withdraw(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n    }\n\n    func transfer(amount: Double, to other: BankAccount) async throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        // Withdraw from self first, then deposit to the other account.\n        // `other` is a different actor, so we need `await` to cross its boundary.\n        balance -= amount\n        try await other.deposit(amount: amount)\n    }\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "Notice [tag]transfer(amount:to:)[/tag] calls [tag]other.deposit(amount:)[/tag] with [tag]await[/tag]. Even though we're inside an actor method, since [tag]other[/tag] is a differentactor instance crossing its boundary still requires [tag]await[/tag]."
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "Step 3: Actor Isolation in Action",
+        "text": "This is where actors feel different from classes. Try accessing [tag]balance[/tag] without [tag]await[/tag] and the compiler won't let you:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// ❌ This won't compile:\nlet account = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\nprint(account.balance)  // Error: expression is 'async' but is not marked with 'await'"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "The compiler is protecting you. [tag]balance[/tag] is isolated to the actor to read it from outside, you must cross the boundary with [tag]await[/tag]."
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// ✅ Correct: always use await to cross the actor boundary\nTask {\n    let account = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\n    print(await account.balance) // 1000.0\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "Step 4: nonisolated Opting Out for Safe Members",
+        "text": "Not everything inside an actor needs protection. [tag]accountNumber[/tag] and [tag]owner[/tag] are [tag]let[/tag] constants, they never change, so there's no possible data race. Forcing callers to [tag]await[/tag] them is unnecessary overhead.</br>The [tag]nonisolated[/tag] keyword opts a specific member out of the actor's isolation:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "extension BankAccount: CustomStringConvertible {\n    // accountNumber and owner are `let` constants, safe to access without await\n    nonisolated var description: String {\n        \"Account \\(accountNumber) (\\(owner))\"\n    }\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "lang": "swift",
+        "text": "Now [tag]CustomStringConvertible[/tag] conformance works synchronously, no [tag]await[/tag] needed:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "let account = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\nprint(account.description)  // ✅ No await. nonisolated, reads only constants"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "The compiler enforces the rule: if you try to read [tag]balance[/tag] inside a [tag]nonisolated[/tag] member, it's a compile error."
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "Step 5: Actor Reentrancy (The One Gotcha)",
+        "text": "Actors are reentrant. When an actor method hits an [tag]await[/tag], it suspends and the actor becomes free to handle other calls. When it resumes, state may have changed.<br/>Here's why this matters for our bank:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// ⚠️ Dangerous pattern: do NOT copy this into the playground\nfunc buyTicket() async {\n    guard balance >= 50 else { return }\n    // Actor suspends here. Another call can run in the meantime.\n    await processPayment()\n    // By the time we resume, balance might already be less than 50!\n    balance -= 50  // potential over-spend\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "The fix is to re-check state after any [tag]await[/tag], or as we've done in [tag]transfer(amount:to:)[/tag] perform all local mutations before the [tag]await[/tag]:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// ✅ Our transfer method is safe because we deduct locally BEFORE awaiting the other actor\nfunc transfer(amount: Double, to other: BankAccount) async throws {\n    // ...\n    balance -= amount            // local mutation first, no suspension yet\n    try await other.deposit(amount: amount)  // suspension happens here, but local state is already committed\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "Step 6: @MainActor: The UI Actor",
+        "text": "[tag]@MainActor[/tag] is a built-in global actor that represents the main thread. Any property or method marked [tag]@MainActor[/tag] is guaranteed to run on the main thread, which is exactly what SwiftUI and UIKit require.<br/> In a playground we don't have a UI, but the concept is identical:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "@MainActor\nfunc printOnMainThread(_ message: String) {\n    // Guaranteed to run on the main thread\n    print(\"[Main] \\(message)\")\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "In a real app, your [tag]ObservableObject[/tag] view models are typically marked [tag]@MainActor[/tag] so every property update is automatically safe for SwiftUI:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// (Illustrative: not part of the playground)\n@MainActor\nfinal class AccountViewModel: ObservableObject {\n    @Published var balanceText: String = \"–\"\n}"
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "The Complete Playground",
+        "text": "Here is everything assembled into a single file you can paste into an Xcode Playground and run immediately. It creates two accounts, runs a series of operations concurrently, and prints the results."
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "import Foundation\n// MARK: - Error\nenum BankError: Error {\n    case insufficientFunds(requested: Double, available: Double)\n    case negativeAmount\n}\n// MARK: - Actor\nactor BankAccount {\n    let accountNumber: String\n    let owner: String\n    private(set) var balance: Double\n    init(accountNumber: String, owner: String, initialBalance: Double) {\n        self.accountNumber = accountNumber\n        self.owner = owner\n        self.balance = initialBalance\n    }\n    func deposit(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        balance += amount\n    }\n    func withdraw(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n    }\n    func transfer(amount: Double, to other: BankAccount) async throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n        try await other.deposit(amount: amount)\n    }\n}\n// MARK: - CustomStringConvertible (nonisolated)\nextension BankAccount: CustomStringConvertible {\n    nonisolated var description: String {\n        \"Account \\(accountNumber) (\\(owner))\"\n    }\n}\n// MARK: - Playground Entry Point\n// Playgrounds need a top-level async entry point.\n// This is the standard way to run async code in a playground.\nTask {\n    let alice = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\n    let bob   = BankAccount(accountNumber: \"002\", owner: \"Bob\",   initialBalance: 500)\n    // nonisolated no await needed\n    print(\"Accounts created:\")\n    print(\"  \\(alice)\")\n    print(\"  \\(bob)\")\n    // Read isolated state await required\n    print(\"\\nInitial balances:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Deposit\n    try await alice.deposit(amount: 200)\n    print(\"\\nAfter Alice deposits $200:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    // Withdraw\n    try await bob.withdraw(amount: 100)\n    print(\"\\nAfter Bob withdraws $100:\")\n    print(\"  Bob: $\\(await bob.balance)\")\n    // Transfer\n    try await alice.transfer(amount: 300, to: bob)\n    print(\"\\nAfter Alice transfers $300 to Bob:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Intentional error: overdraft\n    print(\"\\nAttempting overdraft ($9999 from Bob)...\")\n    do {\n        try await bob.withdraw(amount: 9999)\n    } catch BankError.insufficientFunds(let requested, let available) {\n        print(\"  ❌ Failed: requested $\\(requested), only $\\(available) available\")\n    }\n    // Concurrent deposits, both hit Alice at the same time.\n    // The actor serialises them safely, no data race.\n    print(\"\\nRunning 5 concurrent $10 deposits into Alice's account...\")\n    await withTaskGroup(of: Void.self) { group in\n        for i in 1...5 {\n            group.addTask {\n                try? await alice.deposit(amount: 10)\n                print(\"  Deposit \\(i) completed\")\n            }\n        }\n    }\n    print(\"  Alice final balance: $\\(await alice.balance)\")\n}\n// Keep the playground alive long enough for the async Task to finish.\n// In Xcode Playgrounds, enable \"Run indefinitely\" in the timeline,\n// or add this import and line:\nimport PlaygroundSupport\nPlaygroundPage.current.needsIndefiniteExecution = true"
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "Expected Output"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "log",
+        "code": "Accounts created:\n  Account 001 (Alice)\n  Account 002 (Bob)\nInitial balances:\n  Alice: $1000.0\n  Bob:   $500.0\nAfter Alice deposits $200:\n  Alice: $1200.0\nAfter Bob withdraws $100:\n  Bob: $400.0\nAfter Alice transfers $300 to Bob:\n  Alice: $900.0\n  Bob:   $700.0\nAttempting overdraft ($9999 from Bob)...\n  ❌ Failed: requested $9999.0, only $700.0 available\nRunning 5 concurrent $10 deposits into Alice's account...\n  Deposit 1 completed\n  Deposit 3 completed\n  Deposit 2 completed     ← order may vary: they run concurrently\n  Deposit 5 completed\n  Deposit 4 completed\n  Alice final balance: $950.0"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "The concurrent deposit section is the most instructive part. Five tasks all hit the actor simultaneously but the actor serialises them, so [tag]balance[/tag] is updated atomically each time. Without an actor, this would be a data race. With one, the compiler guarantees it's safe."
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "Summary"
+      }
+    },
+    {
+      "contentType": "table",
+      "body": {
+        "key": "summary",
+        "columnCount": 2,
+        "columnClass": "auto_1fr",
+        "gap": 2,
+        "headers": ["Concept", "What You Learned"],
+        "rows": [
+          [
+            "actor",
+            "A reference type whose mutable state is serialised by the runtime"
+          ],
+          [
+            "`await` on actor members",
+            "Required to cross the isolation boundary from outside"
+          ],
+          [
+            "nonisolated",
+            "Opts a member out of isolation for `let` constants or stateless members"
+          ],
+          [
+            "Actor reentrancy",
+            "State can change across an `await` mutate locally before suspending"
+          ],
+          [
+            "@MainActor",
+            "The global actor for the main thread; used on view models and UI code"
+          ]
+        ]
+      }
+    }
+  ]
+}
