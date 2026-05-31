@@ -5,5 +5,12 @@
     "subtitle": "This is Part 1 of a 3-part series on Swift Concurrency, Mainly focused on Actors & Isolation",
     "postType": "technical",
     "dynamicThumb": false
+  },
+  {
+    "id": "swift-concurrency-p2",
+    "title": "Swift Concurrency Part 2: async/await & Task",
+    "subtitle": "This is Part 2 of a 3-part series on Swift Concurrency, Mainly focused on async/await, Task & asynchronous execution",
+    "postType": "technical",
+    "dynamicThumb": false
   }
 ]

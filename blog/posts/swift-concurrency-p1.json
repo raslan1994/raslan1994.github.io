@@ -13,6 +13,12 @@
       }
     },
     {
+      "contentType": "space",
+      "body": {
+        "height": 10
+      }
+    },
+    {
       "contentType": "bbcode",
       "body": {
         "title": "The Problem Actors Solve",
@@ -23,6 +29,12 @@
       "contentType": "text",
       "body": {
         "text": "Actors are Swift's built-in answer. The compiler enforces thread safety for you. no locks, no queues, no guessing."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
       }
     },
     {
@@ -46,6 +58,12 @@
       }
     },
     {
+      "contentType": "space",
+      "body": {
+        "height": 48
+      }
+    },
+    {
       "contentType": "bbcode",
       "body": {
         "title": "Step 2: Defining an Actor",
@@ -63,6 +81,12 @@
       "contentType": "bbcode",
       "body": {
         "text": "Notice [tag]transfer(amount:to:)[/tag] calls [tag]other.deposit(amount:)[/tag] with [tag]await[/tag]. Even though we're inside an actor method, since [tag]other[/tag] is a differentactor instance crossing its boundary still requires [tag]await[/tag]."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 48
       }
     },
     {
@@ -90,6 +114,12 @@
       "body": {
         "lang": "swift",
         "code": "// ✅ Correct: always use await to cross the actor boundary\nTask {\n    let account = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\n    print(await account.balance) // 1000.0\n}"
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 48
       }
     },
     {
@@ -127,6 +157,12 @@
       }
     },
     {
+      "contentType": "space",
+      "body": {
+        "height": 48
+      }
+    },
+    {
       "contentType": "bbcode",
       "body": {
         "title": "Step 5: Actor Reentrancy (The One Gotcha)",
@@ -151,6 +187,12 @@
       "body": {
         "lang": "swift",
         "code": "// ✅ Our transfer method is safe because we deduct locally BEFORE awaiting the other actor\nfunc transfer(amount: Double, to other: BankAccount) async throws {\n    // ...\n    balance -= amount            // local mutation first, no suspension yet\n    try await other.deposit(amount: amount)  // suspension happens here, but local state is already committed\n}"
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 48
       }
     },
     {
@@ -181,6 +223,12 @@
       }
     },
     {
+      "contentType": "space",
+      "body": {
+        "height": 48
+      }
+    },
+    {
       "contentType": "text",
       "body": {
         "title": "The Complete Playground",
@@ -191,7 +239,7 @@
       "contentType": "code",
       "body": {
         "lang": "swift",
-        "code": "import Foundation\n// MARK: - Error\nenum BankError: Error {\n    case insufficientFunds(requested: Double, available: Double)\n    case negativeAmount\n}\n// MARK: - Actor\nactor BankAccount {\n    let accountNumber: String\n    let owner: String\n    private(set) var balance: Double\n    init(accountNumber: String, owner: String, initialBalance: Double) {\n        self.accountNumber = accountNumber\n        self.owner = owner\n        self.balance = initialBalance\n    }\n    func deposit(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        balance += amount\n    }\n    func withdraw(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n    }\n    func transfer(amount: Double, to other: BankAccount) async throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n        try await other.deposit(amount: amount)\n    }\n}\n// MARK: - CustomStringConvertible (nonisolated)\nextension BankAccount: CustomStringConvertible {\n    nonisolated var description: String {\n        \"Account \\(accountNumber) (\\(owner))\"\n    }\n}\n// MARK: - Playground Entry Point\n// Playgrounds need a top-level async entry point.\n// This is the standard way to run async code in a playground.\nTask {\n    let alice = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\n    let bob   = BankAccount(accountNumber: \"002\", owner: \"Bob\",   initialBalance: 500)\n    // nonisolated no await needed\n    print(\"Accounts created:\")\n    print(\"  \\(alice)\")\n    print(\"  \\(bob)\")\n    // Read isolated state await required\n    print(\"\\nInitial balances:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Deposit\n    try await alice.deposit(amount: 200)\n    print(\"\\nAfter Alice deposits $200:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    // Withdraw\n    try await bob.withdraw(amount: 100)\n    print(\"\\nAfter Bob withdraws $100:\")\n    print(\"  Bob: $\\(await bob.balance)\")\n    // Transfer\n    try await alice.transfer(amount: 300, to: bob)\n    print(\"\\nAfter Alice transfers $300 to Bob:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Intentional error: overdraft\n    print(\"\\nAttempting overdraft ($9999 from Bob)...\")\n    do {\n        try await bob.withdraw(amount: 9999)\n    } catch BankError.insufficientFunds(let requested, let available) {\n        print(\"  ❌ Failed: requested $\\(requested), only $\\(available) available\")\n    }\n    // Concurrent deposits, both hit Alice at the same time.\n    // The actor serialises them safely, no data race.\n    print(\"\\nRunning 5 concurrent $10 deposits into Alice's account...\")\n    await withTaskGroup(of: Void.self) { group in\n        for i in 1...5 {\n            group.addTask {\n                try? await alice.deposit(amount: 10)\n                print(\"  Deposit \\(i) completed\")\n            }\n        }\n    }\n    print(\"  Alice final balance: $\\(await alice.balance)\")\n}\n// Keep the playground alive long enough for the async Task to finish.\n// In Xcode Playgrounds, enable \"Run indefinitely\" in the timeline,\n// or add this import and line:\nimport PlaygroundSupport\nPlaygroundPage.current.needsIndefiniteExecution = true"
+        "code": "import Foundation\n// MARK: Error\nenum BankError: Error {\n    case insufficientFunds(requested: Double, available: Double)\n    case negativeAmount\n}\n// MARK: Actor\nactor BankAccount {\n    let accountNumber: String\n    let owner: String\n    private(set) var balance: Double\n    init(accountNumber: String, owner: String, initialBalance: Double) {\n        self.accountNumber = accountNumber\n        self.owner = owner\n        self.balance = initialBalance\n    }\n    func deposit(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        balance += amount\n    }\n    func withdraw(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n    }\n    func transfer(amount: Double, to other: BankAccount) async throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n        try await other.deposit(amount: amount)\n    }\n}\n// MARK: CustomStringConvertible (nonisolated)\nextension BankAccount: CustomStringConvertible {\n    nonisolated var description: String {\n        \"Account \\(accountNumber) (\\(owner))\"\n    }\n}\n// MARK: Playground Entry Point\n// Playgrounds need a top-level async entry point.\n// This is the standard way to run async code in a playground.\nTask {\n    let alice = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\n    let bob   = BankAccount(accountNumber: \"002\", owner: \"Bob\",   initialBalance: 500)\n    // nonisolated no await needed\n    print(\"Accounts created:\")\n    print(\"  \\(alice)\")\n    print(\"  \\(bob)\")\n    // Read isolated state await required\n    print(\"\\nInitial balances:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Deposit\n    try await alice.deposit(amount: 200)\n    print(\"\\nAfter Alice deposits $200:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    // Withdraw\n    try await bob.withdraw(amount: 100)\n    print(\"\\nAfter Bob withdraws $100:\")\n    print(\"  Bob: $\\(await bob.balance)\")\n    // Transfer\n    try await alice.transfer(amount: 300, to: bob)\n    print(\"\\nAfter Alice transfers $300 to Bob:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Intentional error: overdraft\n    print(\"\\nAttempting overdraft ($9999 from Bob)...\")\n    do {\n        try await bob.withdraw(amount: 9999)\n    } catch BankError.insufficientFunds(let requested, let available) {\n        print(\"  ❌ Failed: requested $\\(requested), only $\\(available) available\")\n    }\n    // Concurrent deposits, both hit Alice at the same time.\n    // The actor serialises them safely, no data race.\n    print(\"\\nRunning 5 concurrent $10 deposits into Alice's account...\")\n    await withTaskGroup(of: Void.self) { group in\n        for i in 1...5 {\n            group.addTask {\n                try? await alice.deposit(amount: 10)\n                print(\"  Deposit \\(i) completed\")\n            }\n        }\n    }\n    print(\"  Alice final balance: $\\(await alice.balance)\")\n}\n// Keep the playground alive long enough for the async Task to finish.\n// In Xcode Playgrounds, enable \"Run indefinitely\" in the timeline,\n// or add this import and line:\nimport PlaygroundSupport\nPlaygroundPage.current.needsIndefiniteExecution = true"
       }
     },
     {
@@ -211,6 +259,12 @@
       "contentType": "bbcode",
       "body": {
         "text": "The concurrent deposit section is the most instructive part. Five tasks all hit the actor simultaneously but the actor serialises them, so [tag]balance[/tag] is updated atomically each time. Without an actor, this would be a data race. With one, the compiler guarantees it's safe."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 48
       }
     },
     {
