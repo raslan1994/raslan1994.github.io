@@ -1,0 +1,443 @@
+{
+  "id": "swift-concurrency-p3",
+  "title": "Swift Concurrency Part 3: @concurrent, Sendable & @unchecked Sendable",
+  "subtitle": "This is Part 2 of a 3-part series on Swift Concurrency, Mainly focused on @concurrent, Sendable & @unchecked Sendable",
+  "postType": "technical",
+  "dynamicThumb": false,
+  "contents": [
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "Setting the Scene",
+        "text": "By this point you understand actors, async/await, and Task. You can write safe concurrent code for most situations. Part 3 goes deeper into three topics that trip up even experienced Swift developers:"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "1. [tag]@concurrent:[/tag] explicitly running work off the current actor onto a background thread<br/>2. [tag]Sendable:[/tag] the compiler's guarantee that values are safe to cross concurrency boundaries<br/>3. [tag]@unchecked Sendable:[/tag] the escape hatch, and exactly when it's justified"
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "Part A: `@concurrent`"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "The Problem It Solves",
+        "text": "In Part 1 we saw that actor methods run on the actor's executor. In Part 2 we saw that [tag]Task {}[/tag] inherits the actor context of the call site. In Swift 6.2 this extended to a third case: [tag]nonisolated async[/tag] functions also stay on the caller's actor by default. <br/>Before Swift 6.2, calling any [tag]nonisolated async[/tag] function from a [tag]@MainActor[/tag] context silently hopped off the main thread to the global thread pool even when there was no reason to. This produced a constant stream of [tag]Sendable[/tag] errors and confusing debugging sessions."
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "Swift 6.2 fixes this: [tag]nonisolated async[/tag] functions stay on the caller's actor unless you explicitly say otherwise. And [tag]@concurrent[/tag] is how you say otherwise."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "1: A CPU-Bound Workload",
+        "text": "To make [tag]@concurrent[/tag] tangible we need something that actually costs CPU time. This function burns cycles computing a sum, a stand-in for real work like JSON decoding, image processing, or cryptography:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "import Foundation\n// Simulates CPU-heavy work: counts from 0 to `iterations`\n// Returns how long it took in milliseconds\nfunc burnCPU(iterations: Int) -> Double {\n    let start = Date()\n    var total = 0\n    for i in 0..<iterations {\n        total &+= i       // &+ is overflow-safe addition\n    }\n    _ = total             // prevent the compiler from optimising the loop away\n    return Date().timeIntervalSince(start) * 1000\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "Using real computation matters here. [tag]Task.sleep[/tag] (from Part 2) just suspends, it doesn't put load on any thread. To show that [tag]@concurrent[/tag] actually moves work off the main actor, we need a function that genuinely keeps a thread busy."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "This actor wraps the CPU work and exposes two versions of the same function, one isolated (runs on the actor's serial executor) and one [tag]@concurrent[/tag] (hops to the global thread pool):"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "actor WorkProcessor {\n    // Isolated: runs on the actor's serial executor\n    // Two calls are serialised: the second waits for the first to finish\n    func processIsolated(label: String, iterations: Int) async -> Double {\n        print(\"  [\\(label)] starting on actor executor...\")\n        let ms = burnCPU(iterations: iterations)\n        print(\"  [\\(label)] done in \\(String(format: \"%.0f\", ms))ms\")\n        return ms\n    }\n\n    // @concurrent: hops off the actor to the global thread pool\n    // Two calls can run truly simultaneously on different threads\n    @concurrent\n    func processConcurrent(label: String, iterations: Int) async -> Double {\n        print(\"  [\\(label)] starting on background thread...\")\n        let ms = burnCPU(iterations: iterations)\n        print(\"  [\\(label)] done in \\(String(format: \"%.0f\", ms))ms\")\n        return ms\n    }\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "The signatures are identical. The only difference is [tag]@concurrent[/tag]. That single keyword changes where the body executes."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "3: Proving the Difference"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "let processor = WorkProcessor()\n// Isolated: serialised. Total time ≈ A + B\nprint(\"=== Isolated (serialised) ===\")\nlet startIsolated = Date()\nasync let a = processor.processIsolated(label: \"A\", iterations: 50_000_000)\nasync let b = processor.processIsolated(label: \"B\", iterations: 50_000_000)\n_ = await (a, b)\nlet isolatedTotal = Date().timeIntervalSince(startIsolated) * 1000\nprint(\"  Total: \\(String(format: \"%.0f\", isolatedTotal))ms\\n\")\n// @concurrent: parallel. Total time ≈ max(A, B)\nprint(\"=== @concurrent (parallel) ===\")\nlet startConcurrent = Date()\nasync let c = processor.processConcurrent(label: \"C\", iterations: 50_000_000)\nasync let d = processor.processConcurrent(label: \"D\", iterations: 50_000_000)\n_ = await (c, d)\nlet concurrentTotal = Date().timeIntervalSince(startConcurrent) * 1000\nprint(\"  Total: \\(String(format: \"%.0f\", concurrentTotal))ms\")"
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "text": "Expected output:"
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "lang": "log",
+        "code": "=== Isolated (serialised) ===\n  [A] starting on actor executor...\n  [A] done in 120ms\n  [B] starting on actor executor...   ← B waits for A to finish\n  [B] done in 118ms\n  Total: 240ms\n=== @concurrent (parallel) ===\n  [C] starting on background thread...\n  [D] starting on background thread...   ← D starts immediately, doesn't wait\n  [C] done in 122ms\n  [D] done in 119ms\n  Total: 124ms   ← roughly half the time"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "The isolated version takes ~240ms. A finishes, then B starts. The [tag]@concurrent[/tag] version takes ~124ms. both run at the same time on separate threads."
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "When to Use `@concurrent`",
+        "text": "Use it for CPU-bound work that genuinely benefits from parallelism:"
+      }
+    },
+    {
+      "contentType": "table",
+      "body": {
+        "id": "concurrent_use",
+        "columnCount": 2,
+        "gap": 2,
+        "headers": ["✅ Good use", "❌ Avoid"],
+        "rows": [
+          ["JSON / Protobuf decoding of large payloads", "Network calls (URLSession already suspends)"],
+          ["Image resizing, filtering, compositing", "Disk reads (already non-blocking in async)"],
+          ["Cryptographic hashing", "Small/fast operations (thread hop overhead > gain)"],
+          ["Text parsing or compression", ""]
+        ]
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "Part B: Sendable"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "What Is `Sendable`?",
+        "text": "[tag]Sendable[/tag] is a protocol with no methods or properties. It's purely a compiler-checked promise: \"values of this type are safe to pass across concurrency boundaries.\""
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "When you send a value from one actor to another or capture it inside a [tag]Task[/tag] Swift verifies the type is [tag]Sendable[/tag]. If it isn't, you get a compile error. This is the compiler stopping a data race before it happens."
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// Sendable has no requirements: conformance is a promise, not an implementation\npublic protocol Sendable {}"
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "4: What Is Automatically `Sendable`?",
+        "text": "Swift synthesises [tag]Sendable[/tag] conformance for types it can prove are safe. You rarely need to write it explicitly for structs and enums:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// ✅ Automatically Sendable: struct with value-type properties\nstruct Article {\n    let id: UUID\n    let title: String\n    let wordCount: Int\n}\n// ✅ Automatically Sendable: enum with Sendable associated values\nenum LoadState {\n    case idle\n    case loading\n    case loaded([Article])\n    case failed(String)\n}\n// ✅ Explicitly Sendable class: all stored properties are `let`\nfinal class AppConfiguration: Sendable {\n    let baseURL: URL\n    let maxRetries: Int\n    let timeoutSeconds: Double\n    init(baseURL: URL, maxRetries: Int, timeoutSeconds: Double) {\n        self.baseURL = baseURL\n        self.maxRetries = maxRetries\n        self.timeoutSeconds = timeoutSeconds\n    }\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "The rule for automatic synthesis:<br/> <ul className='list-disc list-inside'><li>[tag]struct[/tag] / [tag]enum[/tag]: synthesised if all stored properties / associated values are [tag]Sendable[/tag]</li><li>[tag]class[/tag]: synthesised only if all stored properties are [tag]let[/tag] and [tag]Sendable[/tag], and the class is [tag]final[/tag]</li></ul>"
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "5: Sendable Crossing Actor Boundaries",
+        "text": "Here is where [tag]Sendable[/tag] enforcement becomes visible in practice. An actor that stores and returns articles:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "actor ArticleCache {\n    private var cache: [UUID: Article] = [:]\n    func store(_ article: Article) {\n        // Article is Sendable — safe to receive from any actor ✅\n        cache[article.id] = article\n    }\n    func retrieve(id: UUID) -> Article? {\n        cache[id]\n        // Article is Sendable — safe to return to any caller ✅\n    }\n}"
+      }
+    },
+    {
+      "contentType":"bbcode",
+      "body": {
+        "text": "And a [tag]@MainActor[/tag] view model that uses it:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "@MainActor\nfinal class ArticleViewModel {\n    private let cache = ArticleCache()\n    var displayedArticles: [Article] = []\n    func loadAndCache() async {\n        let article = Article(\n            id: UUID(),\n            title: \"Swift Concurrency Deep Dive\",\n            wordCount: 2400\n        )\n        // Passing `article` to the cache actor — Sendable check happens here ✅\n        await cache.store(article)\n        if let cached = await cache.retrieve(id: article.id) {\n            displayedArticles.append(cached)\n            print(\"  Cached and retrieved: \\\"\\(cached.title)\\\"\")\n        }\n    }\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "If [tag]Article[/tag] were a mutable class instead of a struct, the compiler would refuse [tag]await cache.store(article)[/tag] with a Sendable violation before the code ever runs."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "Part C: @unchecked Sendable"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "What It Is",
+        "text": "[tag]@unchecked[/tag] Sendable tells the compiler: \"Trust me: this type is safe across concurrency boundaries, but don't verify it.\""
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "text": "The compiler stops checking. Thread safety is now entirely your responsibility."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "6: A Legitimate Use: Lock-Protected Cache",
+        "text": "The most honest use of [tag]@unchecked Sendable[/tag] is wrapping a mutable class that protects itself with a lock. The compiler can't see through the lock to verify safety. you can, so you take responsibility:"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "final class ThreadSafeCache<Value>: @unchecked Sendable {\n    private var store: [String: Value] = [:]\n    private let lock = NSLock()\n    func set(_ value: Value, for key: String) {\n        lock.withLock {\n            store[key] = value\n        }\n    }\n    func get(_ key: String) -> Value? {\n        lock.withLock {\n            store[key]\n        }\n    }\n    func remove(_ key: String) {\n        lock.withLock {\n            store.removeValue(forKey: key)\n        }\n    }\n    var count: Int {\n        lock.withLock { store.count }\n    }\n}"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "Every access goes through [tag]lock.withLock {}[/tag]. The [tag]NSLock[/tag] genuinely serialises reads and writes, this is thread-safe. The compiler can't see that, so we tell it to trust us with [tag]@unchecked Sendable[/tag]."
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "7: Using the Cache Across Actors"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "actor ImageProcessor {\n    // ThreadSafeCache is @unchecked Sendable: can be passed across actors ✅\n    let resultCache = ThreadSafeCache<String>()\n    @concurrent\n    func process(imageID: String) async -> String {\n        // Simulate CPU-heavy processing\n        _ = burnCPU(iterations: 1_000_000)\n        let result = \"processed-\\(imageID)\"\n        // Write result to the shared cache\n        resultCache.set(result, for: imageID)\n        return result\n    }\n}\n@MainActor\nfinal class ImageViewModel {\n    let processor = ImageProcessor()\n    func processAll() async {\n        let ids = [\"img-1\", \"img-2\", \"img-3\"]\n        // Process all images concurrently via @concurrent\n        await withTaskGroup(of: String.self) { group in\n            for id in ids {\n                group.addTask {\n                    await self.processor.process(imageID: id)\n                }\n            }\n            for await result in group {\n                print(\"  Processed: \\(result)\")\n            }\n        }\n        // Read from the shared cache — safe because ThreadSafeCache uses NSLock\n        let cache = await processor.resultCache\n        print(\"  Cache contains \\(cache.count) results\")\n        print(\"  img-1 → \\(cache.get(\\\"img-1\\\") ?? \\\"missing\\\")\")\n    }\n}"
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "The Line You Must Not Cross"
+      }
+    },
+    {
+      "contentType": "code",
+      "body": {
+        "lang": "swift",
+        "code": "// ❌ This is a lie: nothing protects this state\nfinal class UnsafeStore: @unchecked Sendable {\n    var currentUser: String? // mutable, unprotected — a data race waiting to happen\n}"
+      }
+    },
+    {
+      "contentType":"bbcode",
+      "body": {
+        "text": "Adding [tag]@unchecked Sendable[/tag] without actual synchronisation doesn't make the type safe. It just silences the compiler while leaving a data race in place. The runtime has no mercy for this.<br/>Before reaching for [tag]@unchecked Sendable[/tag], check if a better alternative fits:"
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 10
+      }
+    },
+    {
+      "contentType": "table",
+      "body": {
+        "id": "unchecked_sendable_use",
+        "columnCount": 2,
+        "gap": 2,
+        "headers": ["Situation", "Better alternative"],
+        "rows": [
+          ["Mutable state shared across actors", "Make it an `actor`"],
+          ["Mutable state always on the main thread", "Mark the type `@MainActor`"],
+          ["Immutable shared data", "`struct` or `final class` with all `let`"],
+          ["Bridging a documented thread-safe ObjC type", "`@unchecked Sendable` is justified here"],
+          ["Silencing a warning you don't understand", "Stop. Understand it first."]
+        ]
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "title": "Summary",
+        "text": "[tag]@concurrent[/tag]"
+      }
+    },
+    {
+      "contentType": "list",
+      "body": {
+        "id": "list_summary_concurrent",
+        "list": [
+          "New in Swift 6.2. Hops an async function off the current actor onto the global thread pool.",
+          "Without it, `nonisolated async functions` stay on the caller's actor (the new default in 6.2).",
+          "Use for CPU-bound work: decoding, image processing, cryptography, compression.",
+          "Don't use for network calls `URLSession` already suspends without blocking."
+        ]
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "[tag]Sendable[/tag]"
+      }
+    },
+    {
+      "contentType": "list",
+      "body": {
+        "id": "list_summary_sendable",
+        "list": [
+          "A compiler-checked promise that a value is safe to cross concurrency boundaries.",
+          "Synthesised automatically for structs/enums with `Sendable` properties, and for `final class` with all `let` properties.",
+          "The compiler enforces this at every actor boundary and Task capture, it's your first line of defence against data races."
+        ]
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "[tag]@unchecked Sendable[/tag]"
+      }
+    },
+    {
+      "contentType": "list",
+      "body": {
+        "id": "list_summary_unchecked_sendable",
+        "list": [
+          "Silences the compiler's `Sendable` check. Thread safety is entirely your responsibility.",
+          "Justified for lock-protected mutable classes and documented thread-safe Objective-C types.",
+          "Never use it just to silence a warning you don't understand. A data race is worse than a compile error."
+        ]
+      }
+    },
+    {
+      "contentType": "space",
+      "body": {
+        "height": 32
+      }
+    },
+    {
+      "contentType": "text",
+      "body": {
+        "title": "Where to Go From Here"
+      }
+    },
+    {
+      "contentType": "bbcode",
+      "body": {
+        "text": "<ul class='list-disc list-inside'><li>Read SE-0461: the proposal behind the Swift 6.2 [tag]nonisolated[/tag] default change.</li><li>Enable Thread Sanitizer ([tag]Product → Scheme → Run → Diagnostics[/tag]) during development. It catches data races at runtime that the compiler can miss, especially around [tag]@unchecked Sendable[/tag].</li><li>Look into [tag]withCheckedContinuation[/tag] and [tag]withCheckedThrowingContinuation[/tag] for wrapping legacy callback-based APIs into clean async functions.</li></ul>"
+      }
+    }
+  ]
+}

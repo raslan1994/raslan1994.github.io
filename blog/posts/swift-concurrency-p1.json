@@ -6,19 +6,6 @@
   "dynamicThumb": false,
   "contents": [
     {
-      "contentType": "idea",
-      "body": {
-        "title": "How to follow along",
-        "text": "Every code block in this article is a building block. By the end, you'll have a complete working playground you can paste directly into Xcode and run. No inputs needed."
-      }
-    },
-    {
-      "contentType": "space",
-      "body": {
-        "height": 10
-      }
-    },
-    {
       "contentType": "bbcode",
       "body": {
         "title": "The Problem Actors Solve",
@@ -40,7 +27,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 1: Preparations & Extras",
+        "title": "1: Preparations & Extras",
         "text": "This example follows a simple bank account transaction model. Before we introduce the actor, we define a basic error type to handle cases such as attempting to withdraw more than the available balance. This is a plain [tag]enum[/tag] and is not related to concurrency yet."
       }
     },
@@ -66,7 +53,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 2: Defining an Actor",
+        "title": "2: Defining an Actor",
         "text": "An [tag]actor[/tag] looks almost identical to a [tag]class[/tag]. The difference is what the compiler does with it: [b]only one piece of code can access its mutable state at a time.[/b] No locks required, the Swift runtime serialises access automatically."
       }
     },
@@ -92,7 +79,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 3: Actor Isolation in Action",
+        "title": "3: Actor Isolation in Action",
         "text": "This is where actors feel different from classes. Try accessing [tag]balance[/tag] without [tag]await[/tag] and the compiler won't let you:"
       }
     },
@@ -165,7 +152,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 5: Actor Reentrancy (The One Gotcha)",
+        "title": "5: Actor Reentrancy (The One Gotcha)",
         "text": "Actors are reentrant. When an actor method hits an [tag]await[/tag], it suspends and the actor becomes free to handle other calls. When it resumes, state may have changed.<br/>Here's why this matters for our bank:"
       }
     },
@@ -198,7 +185,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 6: @MainActor: The UI Actor",
+        "title": "6: @MainActor: The UI Actor",
         "text": "[tag]@MainActor[/tag] is a built-in global actor that represents the main thread. Any property or method marked [tag]@MainActor[/tag] is guaranteed to run on the main thread, which is exactly what SwiftUI and UIKit require.<br/> In a playground we don't have a UI, but the concept is identical:"
       }
     },
@@ -223,48 +210,21 @@
       }
     },
     {
-      "contentType": "space",
+      "contentType": "table",
       "body": {
-        "height": 48
-      }
-    },
-    {
-      "contentType": "text",
-      "body": {
-        "title": "The Complete Playground",
-        "text": "Here is everything assembled into a single file you can paste into an Xcode Playground and run immediately. It creates two accounts, runs a series of operations concurrently, and prints the results."
-      }
-    },
-    {
-      "contentType": "code",
-      "body": {
-        "lang": "swift",
-        "code": "import Foundation\n// MARK: Error\nenum BankError: Error {\n    case insufficientFunds(requested: Double, available: Double)\n    case negativeAmount\n}\n// MARK: Actor\nactor BankAccount {\n    let accountNumber: String\n    let owner: String\n    private(set) var balance: Double\n    init(accountNumber: String, owner: String, initialBalance: Double) {\n        self.accountNumber = accountNumber\n        self.owner = owner\n        self.balance = initialBalance\n    }\n    func deposit(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        balance += amount\n    }\n    func withdraw(amount: Double) throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n    }\n    func transfer(amount: Double, to other: BankAccount) async throws {\n        guard amount > 0 else { throw BankError.negativeAmount }\n        guard balance >= amount else {\n            throw BankError.insufficientFunds(\n                requested: amount,\n                available: balance\n            )\n        }\n        balance -= amount\n        try await other.deposit(amount: amount)\n    }\n}\n// MARK: CustomStringConvertible (nonisolated)\nextension BankAccount: CustomStringConvertible {\n    nonisolated var description: String {\n        \"Account \\(accountNumber) (\\(owner))\"\n    }\n}\n// MARK: Playground Entry Point\n// Playgrounds need a top-level async entry point.\n// This is the standard way to run async code in a playground.\nTask {\n    let alice = BankAccount(accountNumber: \"001\", owner: \"Alice\", initialBalance: 1000)\n    let bob   = BankAccount(accountNumber: \"002\", owner: \"Bob\",   initialBalance: 500)\n    // nonisolated no await needed\n    print(\"Accounts created:\")\n    print(\"  \\(alice)\")\n    print(\"  \\(bob)\")\n    // Read isolated state await required\n    print(\"\\nInitial balances:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Deposit\n    try await alice.deposit(amount: 200)\n    print(\"\\nAfter Alice deposits $200:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    // Withdraw\n    try await bob.withdraw(amount: 100)\n    print(\"\\nAfter Bob withdraws $100:\")\n    print(\"  Bob: $\\(await bob.balance)\")\n    // Transfer\n    try await alice.transfer(amount: 300, to: bob)\n    print(\"\\nAfter Alice transfers $300 to Bob:\")\n    print(\"  Alice: $\\(await alice.balance)\")\n    print(\"  Bob:   $\\(await bob.balance)\")\n    // Intentional error: overdraft\n    print(\"\\nAttempting overdraft ($9999 from Bob)...\")\n    do {\n        try await bob.withdraw(amount: 9999)\n    } catch BankError.insufficientFunds(let requested, let available) {\n        print(\"  ❌ Failed: requested $\\(requested), only $\\(available) available\")\n    }\n    // Concurrent deposits, both hit Alice at the same time.\n    // The actor serialises them safely, no data race.\n    print(\"\\nRunning 5 concurrent $10 deposits into Alice's account...\")\n    await withTaskGroup(of: Void.self) { group in\n        for i in 1...5 {\n            group.addTask {\n                try? await alice.deposit(amount: 10)\n                print(\"  Deposit \\(i) completed\")\n            }\n        }\n    }\n    print(\"  Alice final balance: $\\(await alice.balance)\")\n}\n// Keep the playground alive long enough for the async Task to finish.\n// In Xcode Playgrounds, enable \"Run indefinitely\" in the timeline,\n// or add this import and line:\nimport PlaygroundSupport\nPlaygroundPage.current.needsIndefiniteExecution = true"
-      }
-    },
-    {
-      "contentType": "text",
-      "body": {
-        "title": "Expected Output"
-      }
-    },
-    {
-      "contentType": "code",
-      "body": {
-        "lang": "log",
-        "code": "Accounts created:\n  Account 001 (Alice)\n  Account 002 (Bob)\nInitial balances:\n  Alice: $1000.0\n  Bob:   $500.0\nAfter Alice deposits $200:\n  Alice: $1200.0\nAfter Bob withdraws $100:\n  Bob: $400.0\nAfter Alice transfers $300 to Bob:\n  Alice: $900.0\n  Bob:   $700.0\nAttempting overdraft ($9999 from Bob)...\n  ❌ Failed: requested $9999.0, only $700.0 available\nRunning 5 concurrent $10 deposits into Alice's account...\n  Deposit 1 completed\n  Deposit 3 completed\n  Deposit 2 completed     ← order may vary: they run concurrently\n  Deposit 5 completed\n  Deposit 4 completed\n  Alice final balance: $950.0"
-      }
-    },
-    {
-      "contentType": "bbcode",
-      "body": {
-        "text": "The concurrent deposit section is the most instructive part. Five tasks all hit the actor simultaneously but the actor serialises them, so [tag]balance[/tag] is updated atomically each time. Without an actor, this would be a data race. With one, the compiler guarantees it's safe."
-      }
-    },
-    {
-      "contentType": "space",
-      "body": {
-        "height": 48
+        "key": "table_mainactor_vs_actor",
+        "headers": [" ", "actor", "@MainActor"],
+        "columnCount": 3,
+        "rows": [
+          ["What it is", "A type you define", "A global actor Swift provides"],
+          ["You create it", "actor MyThing { }", "Already exists"],
+          [
+            "Use it for",
+            "Business logic, data models",
+            "View models, UI state"
+          ],
+          ["Accessing from outside", "`await` required", "`await` required"]
+        ]
       }
     },
     {

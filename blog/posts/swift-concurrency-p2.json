@@ -6,19 +6,6 @@
   "dynamicThumb": false,
   "contents": [
     {
-      "contentType": "idea",
-      "body": {
-        "title": "How to follow along",
-        "text": "Every code block in this article is a building block. By the end, you'll have a complete working playground you can paste directly into Xcode and run. No network connection needed, we simulate delays with Task.sleep"
-      }
-    },
-    {
-      "contentType": "space",
-      "body": {
-        "height": 10
-      }
-    },
-    {
       "contentType": "text",
       "body": {
         "title": "From Callbacks to async/await",
@@ -60,7 +47,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 1: The Data Models",
+        "title": "1: The Data Models",
         "text": "First, a few plain value types that represent the data we'll be \"fetching\" throughout the article. No networking, no dependencies, just [tag]structs[/tag]."
       }
     },
@@ -80,7 +67,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 2: Simulating a Network with Task.sleep",
+        "title": "2: Simulating a Network with Task.sleep",
         "text": "Real network calls are slow and need a connection. Instead, we'll simulate latency using [tag]Task.sleep(for:)[/tag]. This genuinely suspends the task for the given duration. It's not a busy-wait, so the concurrency behaviour is identical to real network code."
       }
     },
@@ -106,7 +93,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 3: async/await: The Basics",
+        "title": "3: async/await: The Basics",
         "text": "[tag]async[/tag] marks a function as one that can suspend, pause its execution without blocking the underlying thread. [tag]await[/tag] is where a suspension might actually happen."
       }
     },
@@ -132,7 +119,7 @@
     {
       "contentType": "text",
       "body": {
-        "title": "Step 4: Sequential vs Parallel with `async let`",
+        "title": "4: Sequential vs Parallel with `async let`",
         "text": "When two operations are independent, running them sequentially is wasteful:"
       }
     },
@@ -171,7 +158,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 5: `Task` Bridging into Async",
+        "title": "5: `Task` Bridging into Async",
         "text": "[tag]async[/tag] / [tag]await[/tag] describes what to do asynchronously. [tag]Task[/tag] is how you start it from a synchronous context, like a SwiftUI [tag].onAppear[/tag], a [tag]viewDidLoad[/tag], or the top level of a playground."
       }
     },
@@ -223,7 +210,7 @@
     {
       "contentType": "text",
       "body": {
-        "title": "Step 6: Cancellation - Cooperative, Not Forced",
+        "title": "6: Cancellation - Cooperative, Not Forced",
         "text": "Cancelling a task sets a flag, it doesn't forcefully stop execution. Your code has to check for the flag and respond. This is called cooperative cancellation."
       }
     },
@@ -249,7 +236,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 7: `Task.detached` Breaking Away from Context",
+        "title": "7: `Task.detached` Breaking Away from Context",
         "text": "A regular [tag]Task {}[/tag] inherits the actor context and priority of where it was created. [tag]Task.detached[/tag] breaks both links:"
       }
     },
@@ -292,7 +279,7 @@
     {
       "contentType": "bbcode",
       "body": {
-        "title": "Step 8: `withTaskGroup: Dynamic` Parallelism",
+        "title": "8: `withTaskGroup: Dynamic` Parallelism",
         "text": "[tag]async[/tag] let works when you know the number of operations at compile time. For a dynamic collection, an array of IDs use [tag]withTaskGroup:[/tag]"
       }
     },
@@ -307,54 +294,6 @@
       "contentType": "bbcode",
       "body": {
         "text": "All [tag]addTask[/tag] calls start immediately and run concurrently. If any task throws, the group cancels the rest automatically."
-      }
-    },
-    {
-      "contentType": "space",
-      "body": {
-        "height": 32
-      }
-    },
-    {
-      "contentType": "text",
-      "body": {
-        "title": "The Complete Playground",
-        "text": "Everything above in a single file. Paste it into an Xcode Playground and run."
-      }
-    },
-    {
-      "contentType": "code",
-      "body": {
-        "lang": "swift",
-        "code": "import Foundation\nimport PlaygroundSupport\n\nPlaygroundPage.current.needsIndefiniteExecution = true\n\n// MARK: Models\n\nstruct User {\n    let id: Int\n    let name: String\n}\n\nstruct Post {\n    let id: Int\n    let userID: Int\n    let title: String\n}\n\nstruct UserProfile {\n    let user: User\n    let posts: [Post]\n}\n\n// MARK: Fake Network\n\nenum FakeNetwork {\n\n    static func fetchUser(id: Int) async throws -> User {\n        try await Task.sleep(for: .milliseconds(300))\n        return User(id: id, name: \"User \\(id)\")\n    }\n\n    static func fetchPosts(userID: Int) async throws -> [Post] {\n        try await Task.sleep(for: .milliseconds(500))\n        return [\n            Post(id: userID * 10 + 1, userID: userID, title: \"Understanding Actors\"),\n            Post(id: userID * 10 + 2, userID: userID, title: \"async/await in Practice\"),\n            Post(id: userID * 10 + 3, userID: userID, title: \"When to Use Task.detached\"),\n        ]\n    }\n\n    static func sendNotification(to userID: Int, message: String) async throws {\n        try await Task.sleep(for: .milliseconds(200))\n        print(\"  📬 Notification sent to user \\(userID): \\\"\\(message)\\\"\")\n    }\n}\n\n// MARK: Sequential vs Parallel\n\nfunc loadProfileSequential(userID: Int) async throws -> UserProfile {\n    let start = Date()\n    let user  = try await FakeNetwork.fetchUser(id: userID)\n    let posts = try await FakeNetwork.fetchPosts(userID: userID)\n    let elapsed = Date().timeIntervalSince(start)\n    print(\"  Sequential: \\(String(format: \"%.2f\", elapsed))s\")\n    return UserProfile(user: user, posts: posts)\n}\n\nfunc loadProfileParallel(userID: Int) async throws -> UserProfile {\n    let start = Date()\n    async let user  = FakeNetwork.fetchUser(id: userID)\n    async let posts = FakeNetwork.fetchPosts(userID: userID)\n    let (resolvedUser, resolvedPosts) = try await (user, posts)\n    let elapsed = Date().timeIntervalSince(start)\n    print(\"  Parallel:   \\(String(format: \"%.2f\", elapsed))s\")\n    return UserProfile(user: resolvedUser, posts: resolvedPosts)\n}\n\n// MARK: Cancellation\n\nfunc processPosts(_ posts: [Post]) async throws {\n    for post in posts {\n        try Task.checkCancellation()\n        try await Task.sleep(for: .milliseconds(100))\n        print(\"  ✓ Processed: \\\"\\(post.title)\\\"\")\n    }\n}\n\n// MARK: Task Group\n\nfunc fetchAllProfiles(userIDs: [Int]) async throws -> [UserProfile] {\n    try await withThrowingTaskGroup(of: UserProfile.self) { group in\n        for id in userIDs {\n            group.addTask {\n                let user  = try await FakeNetwork.fetchUser(id: id)\n                let posts = try await FakeNetwork.fetchPosts(userID: id)\n                return UserProfile(user: user, posts: posts)\n            }\n        }\n        var profiles: [UserProfile] = []\n        for try await profile in group {\n            profiles.append(profile)\n        }\n        return profiles\n    }\n}\n\n// MARK: Entry Point\n\nTask {\n\n    // 1. Sequential vs Parallel\n    print(\"=== Sequential vs Parallel ===\")\n    _ = try await loadProfileSequential(userID: 1)\n    _ = try await loadProfileParallel(userID: 1)\n\n    // 2. Task priority\n    print(\"\\n=== Task Priority ===\")\n    Task(priority: .userInitiated) {\n        print(\"  [userInitiated] fetching user...\")\n        _ = try await FakeNetwork.fetchUser(id: 99)\n        print(\"  [userInitiated] done\")\n    }\n    Task(priority: .background) {\n        print(\"  [background] sending notification...\")\n        try await FakeNetwork.sendNotification(to: 99, message: \"Hello!\")\n    }\n\n    // Small pause so the above tasks print before we move on\n    try await Task.sleep(for: .milliseconds(600))\n\n    // 3. Cancellation\n    print(\"\\n=== Cancellation ===\")\n    let posts = try await FakeNetwork.fetchPosts(userID: 1)\n\n    let processingTask = Task {\n        do {\n            try await processPosts(posts)\n        } catch is CancellationError {\n            print(\"  ⛔ Processing cancelled mid-way\")\n        }\n    }\n\n    // Cancel after 250ms, should interrupt after ~2 posts processed\n    try await Task.sleep(for: .milliseconds(250))\n    processingTask.cancel()\n\n    // Wait for the cancelled task to fully wind down\n    try await Task.sleep(for: .milliseconds(200))\n\n    // 4. Task.detached\n    print(\"\\n=== Task.detached ===\")\n    Task.detached(priority: .background) {\n        print(\"  [detached] running independently...\")\n        try? await FakeNetwork.sendNotification(to: 1, message: \"Detached sync done\")\n    }\n\n    // Wait a moment for the detached task to complete\n    try await Task.sleep(for: .milliseconds(400))\n\n    // 5. withTaskGroup\n    print(\"\\n=== withTaskGroup (3 profiles in parallel) ===\")\n    let start = Date()\n    let profiles = try await fetchAllProfiles(userIDs: [1, 2, 3])\n    let elapsed = Date().timeIntervalSince(start)\n\n    for profile in profiles {\n        print(\"  \\(profile.user.name): \\(profile.posts.count) posts\")\n    }\n    // All 3 fetched concurrently, takes ~500ms instead of ~2400ms\n    print(\"  Finished in \\(String(format: \"%.2f\", elapsed))s (vs ~2.40s sequential)\")\n\n    print(\"\\n✅ All done\")\n    PlaygroundPage.current.finishExecution()\n}"
-      }
-    },
-    {
-      "contentType": "text",
-      "body": {
-        "title": "Expected Output"
-      }
-    },
-    {
-      "contentType": "code",
-      "body": {
-        "lang": "log",
-        "code": "=== Sequential vs Parallel ===\n  Sequential: 0.80s\n  Parallel:   0.50s\n=== Task Priority ===\n  [userInitiated] fetching user...\n  [background] sending notification...\n  📬 Notification sent to user 99: \"Hello!\"\n  [userInitiated] done\n=== Cancellation ===\n  ✓ Processed: \"Understanding Actors\"\n  ✓ Processed: \"async/await in Practice\"\n  ⛔ Processing cancelled mid-way\n=== Task.detached ===\n  [detached] running independently...\n  📬 Notification sent to user 1: \"Detached sync done\"\n=== withTaskGroup (3 profiles in parallel) ===\n  User 1: 3 posts\n  User 3: 3 posts    ← order may vary, tasks complete as they finish\n  User 2: 3 posts\n  Finished in 0.51s (vs ~2.40s sequential)\n✅ All done"
-      }
-    },
-    {
-      "contentType": "text",
-      "body": {
-        "text": "The two numbers worth paying attention to:"
-      }
-    },
-    {
-      "contentType": "list",
-      "body": {
-        "list": [
-          "Sequential vs Parallel: 0.80s → 0.50s. In a real app with slow network calls, this gap is much larger.",
-          "Task group: 3 profiles fetched in 0.51s instead of ~2.40s. Each profile takes ~800ms sequentially; the group runs all three at once."
-        ]
       }
     },
     {
